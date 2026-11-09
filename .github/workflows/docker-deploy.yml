@@ -1,0 +1,65 @@
+
+name: Docker Deploy
+
+on:
+  workflow_run:
+    workflows: ["Docker Build and Push"]
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    runs-on: [self-hosted, Windows, X64]
+
+    steps:
+      - name: Pull Docker image
+        shell: powershell
+        run: docker pull impleon/game-dev-schedule:latest
+
+      - name: Stop old container
+        shell: powershell
+        run: |
+          docker stop game-dev-container 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "No running container to stop"
+          }
+
+          docker rm game-dev-container 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "No old container to remove"
+          }
+
+      - name: Start new container
+        shell: powershell
+        run: |
+          docker run -d `
+            --name game-dev-container `
+            --restart unless-stopped `
+            -p 5000:5000 `
+            impleon/game-dev-schedule:latest
+
+          if ($LASTEXITCODE -ne 0) {
+            exit 1
+          }
+
+      - name: Check container
+        shell: powershell
+        run: |
+          docker ps
+          Start-Sleep -Seconds 5
+          $response = Invoke-WebRequest `
+            -Uri "http://localhost:5000" `
+            -UseBasicParsing
+          Write-Host "HTTP Status: $($response.StatusCode)"
+          if ($response.StatusCode -ne 200) {
+            exit 1
+          }
